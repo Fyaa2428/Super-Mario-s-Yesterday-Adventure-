@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mario Platformer - Checkpoints & Levels</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background-color: #111;
+            color: #fff;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+        #game-container {
+            position: relative;
+            width: 800px;
+            height: 400px;
+            background: linear-gradient(#5c94fc, #80bfff);
+            border: 4px solid #fff;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.5);
+        }
+        #world {
+            position: absolute;
+            top: 0;
+            left: 0;
+            height: 100%;
+            width: 2400px; /* Long horizontal world */
+            transition: transform 0.1s linear;
+        }
+        /* Game Objects */
+        .ground {
+            position: absolute;
+            bottom: 0;
+            height: 50px;
+            background-color: #c84c0c;
+            border-top: 4px solid #00a800;
+        }
+        .platform {
+            position: absolute;
+            background-color: #b84418;
+            border: 2px solid #000;
+            border-radius: 4px;
+        }
+        #player {
+            position: absolute;
+            width: 30px;
+            height: 40px;
+            background-color: #e52521;
+            border: 2px solid #000;
+            border-radius: 4px;
+            z-index: 10;
+        }
+        #player::after {
+            content: '🧢';
+            position: absolute;
+            top: -6px;
+            left: 2px;
+            font-size: 16px;
+        }
+        .checkpoint {
+            position: absolute;
+            width: 10px;
+            height: 60px;
+            background-color: #aaa;
+            bottom: 50px;
+        }
+        .checkpoint-flag {
+            position: absolute;
+            top: 0;
+            left: 10px;
+            width: 30px;
+            height: 20px;
+            background-color: #ffcc00;
+            color: #000;
+            font-weight: bold;
+            font-size: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid #000;
+            transition: background-color 0.3s;
+        }
+        .checkpoint.active .checkpoint-flag {
+            background-color: #00e676;
+            color: #fff;
+        }
+        .final-flag {
+            position: absolute;
+            width: 12px;
+            height: 120px;
+            background-color: #fff;
+            bottom: 50px;
+        }
+        .final-flag-top {
+            position: absolute;
+            top: 0;
+            left: 12px;
+            width: 40px;
+            height: 30px;
+            background-color: #e52521;
+            color: #fff;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid #000;
+            opacity: 0.5;
+        }
+        .final-flag.unlocked .final-flag-top {
+            opacity: 1;
+            background-color: #00e676;
+            animation: pulse 1s infinite alternate;
+        }
+        @keyframes pulse {
+            from { transform: scale(1); }
+            to { transform: scale(1.1); }
+        }
+        /* UI Overlay */
+        #hud {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            right: 10px;
+            display: flex;
+            justify-content: space-between;
+            font-weight: bold;
+            font-size: 16px;
+            text-shadow: 2px 2px #000;
+            z-index: 20;
+        }
+        #controls-hint {
+            margin-top: 15px;
+            color: #aaa;
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <div id="hud">
+            <div id="level-title">WORLD 1-1</div>
+            <div id="checkpoint-status">🚩 Checkpoints: 0 / 2</div>
+        </div>
+
+        <div id="world">
+            <div class="ground" style="left:0; width: 2400px;"></div>
+
+            <!-- Platforms -->
+            <div class="platform" style="left: 300px; bottom: 120px; width: 120px; height: 20px;"></div>
+            <div class="platform" style="left: 750px; bottom: 150px; width: 140px; height: 20px;"></div>
+            <div class="platform" style="left: 1300px; bottom: 130px; width: 160px; height: 20px;"></div>
+
+            <!-- Checkpoint 1 -->
+            <div id="cp1" class="checkpoint" style="left: 500px;">
+                <div class="checkpoint-flag">CP1</div>
+            </div>
+
+            <!-- Checkpoint 2 -->
+            <div id="cp2" class="checkpoint" style="left: 1100px;">
+                <div class="checkpoint-flag">CP2</div>
+            </div>
+
+            <!-- Final Goal Flag -->
+            <div id="final-flag" class="final-flag" style="left: 1800px;">
+                <div class="final-flag-top">GOAL</div>
+            </div>
+
+            <!-- Player -->
+            <div id="player"></div>
+        </div>
+    </div>
+
+    <div id="controls-hint">
+        Controls: <b>A / D</b> or <b>Left / Right Arrow</b> to move | <b>W / Spacebar / Up Arrow</b> to jump
+    </div>
+
+    <script>
+        const player = document.getElementById('player');
+        const world = document.getElementById('world');
+        const cp1 = document.getElementById('cp1');
+        const cp2 = document.getElementById('cp2');
+        const finalFlag = document.getElementById('final-flag');
+        const statusText = document.getElementById('checkpoint-status');
+        const levelTitle = document.getElementById('level-title');
+
+        let currentWorld = 1;
+        let currentLevel = 1;
+
+        // Player physics state
+        let posX = 50;
+        let posY = 50; // Distance from bottom
+        let velX = 0;
+        let velY = 0;
+        let isGrounded = true;
+
+        const gravity = 0.6;
+        const speed = 4;
+        const jumpForce = 12;
+
+        // Checkpoint state
+        let cp1Reached = false;
+        let cp2Reached = false;
+
+        const keys = {};
+
+        window.addEventListener('keydown', e => keys[e.code] = true);
+        window.addEventListener('keyup', e => keys[e.code] = false);
+
+        function update() {
+            // Horizontal movement
+            if (keys['ArrowRight'] || keys['KeyD']) velX = speed;
+            else if (keys['ArrowLeft'] || keys['KeyA']) velX = -speed;
+            else velX = 0;
+
+            // Jumping
+            if ((keys['ArrowUp'] || keys['KeyW'] || keys['Space']) && isGrounded) {
+                velY = jumpForce;
+                isGrounded = false;
+            }
+
+            // Gravity
+            velY -= gravity;
+            posY += velY;
+            posX += velX;
+
+            // Boundary collision (Left)
+            if (posX < 0) posX = 0;
+
+            // Ground Collision
+            let groundHeight = 50;
+            
+            // Basic Platform Collisions
+            const platforms = [
+                { left: 300, right: 420, bottom: 120, top: 140 },
+                { left: 750, right: 890, bottom: 150, top: 170 },
+                { left: 1300, right: 1460, bottom: 130, top: 150 }
+            ];
+
+            let onPlatform = false;
+            for (let p of platforms) {
+                if (posX + 30 > p.left && posX < p.right && posY <= p.top && posY >= p.bottom) {
+                    if (velY <= 0) {
+                        posY = p.top;
+                        velY = 0;
+                        isGrounded = true;
+                        onPlatform = true;
+                    }
+                }
+            }
+
+            if (!onPlatform && posY <= groundHeight) {
+                posY = groundHeight;
+                velY = 0;
+                isGrounded = true;
+            }
+
+            // Checkpoint 1 Logic
+            if (!cp1Reached && posX >= 500) {
+                cp1Reached = true;
+                cp1.classList.add('active');
+                updateHUD();
+            }
+
+            // Checkpoint 2 Logic
+            if (!cp2Reached && posX >= 1100) {
+                cp2Reached = true;
+                cp2.classList.add('active');
+                finalFlag.classList.add('unlocked');
+                updateHUD();
+            }
+
+            // Final Flag / Next Level Logic
+            if (posX >= 1800) {
+                if (cp1Reached && cp2Reached) {
+                    nextLevel();
+                } else {
+                    // Blocked until both checkpoints are cleared
+                    posX = 1790;
+                }
+            }
+
+            // Render positions
+            player.style.left = posX + 'px';
+            player.style.bottom = posY + 'px';
+
+            // Camera follow (Keep player centered)
+            let cameraX = Math.max(0, posX - 350);
+            world.style.transform = `translateX(-${cameraX}px)`;
+
+            requestAnimationFrame(update);
+        }
+
+        function updateHUD() {
+            let count = (cp1Reached ? 1 : 0) + (cp2Reached ? 1 : 0);
+            statusText.innerText = `🚩 Checkpoints: ${count} / 2`;
+        }
+
+        function nextLevel() {
+            currentLevel++;
+            if (currentLevel > 3) {
+                currentWorld++;
+                currentLevel = 1;
+            }
+            levelTitle.innerText = `WORLD ${currentWorld}-${currentLevel}`;
+
+            // Reset player & checkpoints
+            posX = 50;
+            posY = 50;
+            velX = 0;
+            velY = 0;
+            cp1Reached = false;
+            cp2Reached = false;
+            cp1.classList.remove('active');
+            cp2.classList.remove('active');
+            finalFlag.classList.remove('unlocked');
+            updateHUD();
+
+            alert(`🎉 Level Clear! Welcome to WORLD ${currentWorld}-${currentLevel}`);
+        }
+
+        requestAnimationFrame(update);
+    </script>
+</body>
+</html>
